@@ -2,49 +2,45 @@
 import { useState, useRef } from 'react';
 
 export default function Home() {
-  const [messages, setMessages] = useState([]);       // chat history (array of {role, text})
-  const [currentAnswer, setCurrentAnswer] = useState(""); // partial streaming answer
-  const [question, setQuestion] = useState("");       // current question input
-  const currentAnswerRef = useRef("");               // useRef to accumulate streaming text
+  const [messages, setMessages] = useState([]);       // Chat history
+  const [currentAnswer, setCurrentAnswer] = useState(""); // Streaming answer
+  const [question, setQuestion] = useState("");       // Current question input
+  const currentAnswerRef = useRef("");               // To accumulate streaming text
 
-  // Handle PDF file selection and upload
+  // Handle PDF file upload
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    // Send the file to the backend via an API call
     const formData = new FormData();
     formData.append('file', file);
     try {
-      // Using Next.js rewrite: the URL '/api/upload' is proxied to the Express server
       const res = await fetch('/api/upload', {
         method: 'POST',
         body: formData
       });
       if (!res.ok) throw new Error("Upload failed");
-      alert("PDF uploaded and processed successfully!");
-    } catch (err) {
-      console.error(err);
-      alert("Error uploading file: " + err.message);
+      const data = await res.json();
+      alert(`PDF processed successfully with ${data.chunks} chunks.`);
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      alert("Error uploading file: " + error.message);
     }
   };
 
-  // Handle sending a question to the chatbot
+  // Handle sending a question
   const handleAskQuestion = async () => {
     if (!question) return;
-    // Append user's question to chat history
     setMessages((msgs) => [...msgs, { role: 'user', text: question }]);
     setCurrentAnswer(""); 
     currentAnswerRef.current = "";
-    setQuestion("");  // clear input field
+    setQuestion("");
 
     try {
-      // Open a connection to the streaming endpoint
       const response = await fetch(`/api/chat?question=${encodeURIComponent(question)}`, {
         method: 'GET'
       });
       if (!response.body) throw new Error("No response body");
 
-      // Use the ReadableStream to read chunks from the response
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let done = false;
@@ -52,27 +48,21 @@ export default function Home() {
         const { value, done: doneReading } = await reader.read();
         done = doneReading;
         if (value) {
-          // Decode and accumulate the chunk
           const chunk = decoder.decode(value);
-          // The server sends SSE formatted chunks "data: <text>\n\n"
-          // We split by SSE delimiter to get the actual text
           const lines = chunk.split('\n');
           for (let line of lines) {
             if (line.startsWith('data: ')) {
               const data = line.replace(/^data: /, '');
               if (data === "[DONE]") {
-                // Stream end signal
                 done = true;
                 break;
               }
-              // Update the streaming answer state
               currentAnswerRef.current += data;
               setCurrentAnswer((prev) => prev + data);
             }
           }
         }
       }
-      // After done, save the full assistant answer to chat history
       setMessages((msgs) => [...msgs, { role: 'assistant', text: currentAnswerRef.current }]);
       setCurrentAnswer("");
     } catch (err) {
@@ -104,7 +94,6 @@ export default function Home() {
             </div>
           </div>
         ))}
-        {/* Streaming response in progress */}
         {currentAnswer && (
           <div className="my-1 flex justify-start">
             <div className="px-3 py-2 rounded-lg bg-gray-300 text-black">
