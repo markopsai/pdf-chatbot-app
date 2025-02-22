@@ -1,12 +1,12 @@
 // pages/api/chat.js
 import { PineconeClient } from '@pinecone-database/pinecone';
-import { OpenAIApi, Configuration } from 'openai';
+import { Configuration, OpenAIApi } from 'openai';
 import { NextApiRequest, NextApiResponse } from 'next';
 
-// SSE in Next.js API routes is trickier, but let's do a basic approach:
+// We'll do a standard Next.js API route for SSE
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: `Method ${req.method} not allowed.` });
+    return res.status(405).json({ error: `Method '${req.method}' Not Allowed` });
   }
 
   const { question } = req.query;
@@ -18,8 +18,8 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  // flush headers
-  res.flushHeaders && res.flushHeaders();
+  // Some environments need flushHeaders
+  if (res.flushHeaders) res.flushHeaders();
 
   try {
     // Init Pinecone
@@ -34,14 +34,14 @@ export default async function handler(req, res) {
     const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
     const openai = new OpenAIApi(configuration);
 
-    // Get question embedding
+    // 1) Embed the question
     const embResponse = await openai.createEmbedding({
       model: 'text-embedding-ada-002',
       input: question,
     });
     const questionEmbedding = embResponse.data.data[0].embedding;
 
-    // Query Pinecone
+    // 2) Query Pinecone
     const queryResponse = await index.query({
       vector: questionEmbedding,
       topK: 5,
@@ -59,27 +59,31 @@ export default async function handler(req, res) {
       contextText = 'The document is empty or not relevant.';
     }
 
-    // Build messages for ChatGPT
+    // 3) Build ChatGPT prompt
     const messages = [
       { role: 'system', content: 'You are a helpful assistant. Use the provided document text to answer the question.' },
       { role: 'user', content: `${contextText}\nQuestion: ${question}\nAnswer:` },
     ];
 
-    // Stream from GPT-3.5 (SSE)
-    const chatCompletion = await openai.createChatCompletion({
-      model: 'gpt-3.5-turbo',
-      messages,
-      stream: true,
-    }, { responseType: 'stream' });
+    // 4) Call ChatGPT with streaming
+    const chatCompletion = await openai.createChatCompletion(
+      {
+        model: 'gpt-3.5-turbo',
+        messages,
+        stream: true,
+      },
+      { responseType: 'stream' }
+    );
 
-    // Pipe the data chunks back to the client
+    // 5) Pipe streaming data back to the client
     chatCompletion.data.on('data', (chunk) => {
       const payload = chunk.toString();
-      // The data can contain multiple chunks/deltas
       const lines = payload.split('\n');
       for (let line of lines) {
         line = line.trim();
-        if (!line || line.startsWith('data: [DONE]')) {
+        if (!line) continue;
+        if (line.startsWith('data: [DONE]')) {
+          // Signal the end
           res.write(`data: [DONE]\n\n`);
           return;
         }
@@ -114,5 +118,3 @@ export default async function handler(req, res) {
     res.end();
   }
 }
-
-// We can keep default body parsing on for GET requests
