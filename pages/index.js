@@ -1,27 +1,28 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
+  // Chat logic states
   const [messages, setMessages] = useState([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
   const [question, setQuestion] = useState("");
   const currentAnswerRef = useRef("");
 
-  // Track upload progress/logs (optional)
+  // File upload states
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
 
-  // Upload PDF using XHR for progress
-  const handleFileUpload = (e) => {
+  // Handle PDF file upload via XHR for progress
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     setUploadProgress(0);
     setUploadLogs([]);
+    setIsUploading(true);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
 
-    // Track upload progress
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) {
         const percent = (ev.loaded / ev.total) * 100;
@@ -30,6 +31,7 @@ export default function Home() {
     };
 
     xhr.onload = () => {
+      setIsUploading(false);
       if (xhr.status === 200) {
         const response = JSON.parse(xhr.responseText);
         alert(`PDF processed successfully with ${response.chunks} chunks.`);
@@ -42,6 +44,7 @@ export default function Home() {
     };
 
     xhr.onerror = () => {
+      setIsUploading(false);
       alert('Network or server error during upload.');
     };
 
@@ -50,9 +53,9 @@ export default function Home() {
     xhr.send(formData);
   };
 
-  // Ask question (SSE streaming)
+  // Handle question + streaming chat response
   const handleAskQuestion = async () => {
-    if (!question) return;
+    if (!question.trim()) return;
     setMessages((msgs) => [...msgs, { role: 'user', text: question }]);
     setCurrentAnswer("");
     currentAnswerRef.current = "";
@@ -93,81 +96,130 @@ export default function Home() {
     }
   };
 
+  // Auto-scroll to bottom of chat
+  const chatEndRef = useRef(null);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, currentAnswer]);
+
   return (
-    <div className="container mx-auto p-4 max-w-2xl">
-      <h1 className="text-2xl font-bold mb-4">PDF Chatbot</h1>
-
-      {/* PDF Upload */}
-      <div className="mb-4">
-        <input
-          type="file"
-          accept="application/pdf"
-          onChange={handleFileUpload}
-          className="file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700"
-        />
+    <div className="h-screen w-screen flex flex-col bg-gray-100">
+      {/* Top Nav Bar */}
+      <div className="w-full bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
+        <div className="text-lg font-bold text-gray-800">
+          My PDF Chatbot
+        </div>
+        <div className="text-sm text-gray-500">
+          Ask questions about your uploaded PDF
+        </div>
       </div>
 
-      {/* Upload Progress Bar */}
-      {uploadProgress > 0 && uploadProgress < 100 && (
-        <div className="w-full bg-gray-200 rounded h-4 mb-4">
-          <div
-            className="bg-blue-600 h-4 rounded"
-            style={{ width: `${uploadProgress}%` }}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="hidden md:flex flex-col w-64 bg-gray-200 p-4 border-r">
+          <h2 className="font-semibold text-gray-700 mb-2">PDF Upload</h2>
+          <p className="text-xs text-gray-600 mb-3">
+            Upload a PDF to process it for Q&A.
+          </p>
+          <label className="block mb-2 text-sm font-medium text-gray-700">
+            Choose PDF
+          </label>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handleFileUpload}
+            className="mb-4 text-sm file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700"
           />
-        </div>
-      )}
-      {uploadProgress === 100 && (
-        <p className="mb-4">Upload complete. Processing on server...</p>
-      )}
 
-      {/* Upload Logs */}
-      {uploadLogs.length > 0 && (
-        <div className="mb-4 bg-gray-100 p-2 rounded">
-          <h2 className="font-semibold">Upload Logs:</h2>
-          <ul className="list-disc list-inside">
-            {uploadLogs.map((log, idx) => (
-              <li key={idx}>{log}</li>
+          {/* Upload progress bar */}
+          {isUploading && (
+            <div className="w-full bg-gray-300 rounded h-4 mb-3">
+              <div
+                className="bg-blue-600 h-4 rounded"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          )}
+
+          {uploadLogs.length > 0 && (
+            <div className="mt-2 bg-white p-2 rounded shadow text-xs overflow-y-auto max-h-64">
+              <h3 className="font-semibold mb-1">Logs:</h3>
+              <ul className="list-disc ml-4">
+                {uploadLogs.map((log, idx) => (
+                  <li key={idx}>{log}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Chat messages */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {messages.map((msg, idx) => (
+              <ChatBubble key={idx} role={msg.role} text={msg.text} />
             ))}
-          </ul>
+
+            {/* Streaming partial answer */}
+            {currentAnswer && (
+              <ChatBubble role="assistant" text={currentAnswer} streaming />
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat input bar */}
+          <div className="border-t p-3 bg-white">
+            <div className="flex items-center">
+              <textarea
+                className="flex-grow border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                rows={1}
+                placeholder="Ask a question about the PDF..."
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAskQuestion();
+                  }
+                }}
+              />
+              <button
+                onClick={handleAskQuestion}
+                className="ml-2 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+              >
+                Send
+              </button>
+            </div>
+          </div>
         </div>
-      )}
-
-      {/* Chat History */}
-      <div className="mb-4 max-h-80 overflow-y-auto border p-3 rounded bg-gray-50">
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`my-1 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`px-3 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-300 text-black'}`}>
-              <span className="font-semibold">{msg.role === 'user' ? 'You: ' : 'Assistant: '}</span>
-              {msg.text}
-            </div>
-          </div>
-        ))}
-        {currentAnswer && (
-          <div className="my-1 flex justify-start">
-            <div className="px-3 py-2 rounded-lg bg-gray-300 text-black">
-              <span className="font-semibold">Assistant: </span>{currentAnswer}
-              <span className="animate-pulse">▌</span>
-            </div>
-          </div>
-        )}
       </div>
+    </div>
+  );
+}
 
-      {/* Question Input */}
-      <div className="flex">
-        <input
-          type="text"
-          className="flex-grow border rounded px-3 py-2"
-          placeholder="Ask a question about the PDF..."
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleAskQuestion(); }}
-        />
-        <button
-          onClick={handleAskQuestion}
-          className="ml-2 px-4 py-2 bg-blue-600 text-white rounded"
-        >
-          Send
-        </button>
+/** 
+ * A reusable chat bubble component 
+ * role: "user" or "assistant"
+ * text: message text
+ * streaming: optional boolean (if the assistant is currently streaming text)
+ */
+function ChatBubble({ role, text, streaming }) {
+  const isUser = role === 'user';
+  return (
+    <div className={`mb-3 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[75%] px-4 py-2 rounded-lg text-sm whitespace-pre-wrap
+          ${isUser ? 'bg-blue-600 text-white' : 'bg-white text-gray-800 border'}
+        `}
+      >
+        <span className="font-semibold block mb-1">
+          {isUser ? 'You' : 'Assistant'}
+        </span>
+        {text}
+        {streaming && (
+          <span className="animate-pulse ml-1">▌</span>
+        )}
       </div>
     </div>
   );
