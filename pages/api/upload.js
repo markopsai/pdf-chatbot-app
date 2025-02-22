@@ -8,8 +8,8 @@ import { OpenAIApi, Configuration } from 'openai';
 
 // Use /tmp in Vercel for uploads
 const upload = multer({
-  dest: '/tmp', // ephemeral in serverless
-  limits: { fileSize: 50 * 1024 * 1024 } // 50 MB
+  dest: '/tmp',
+  limits: { fileSize: 100 * 1024 * 1024 } // e.g., 100 MB
 });
 
 // Next-connect handler
