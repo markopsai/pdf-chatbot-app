@@ -6,13 +6,12 @@ import pdfParse from 'pdf-parse';
 import { PineconeClient } from '@pinecone-database/pinecone';
 import { Configuration, OpenAIApi } from 'openai';
 
-// Ephemeral storage on Vercel
+// Ephemeral storage (for small PDFs) if you still do direct uploads
 const upload = multer({
   dest: '/tmp',
-  limits: { fileSize: 50 * 1024 * 1024 } // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-// next-connect handler
 const apiRoute = nextConnect({
   onError(error, req, res) {
     console.error('Upload error:', error);
@@ -23,47 +22,46 @@ const apiRoute = nextConnect({
   },
 });
 
-// Attach multer middleware
 apiRoute.use(upload.single('file'));
 
-// The main POST route
 apiRoute.post(async (req, res) => {
   const logs = [];
   try {
+    // 1) Validate file
     if (!req.file) {
       logs.push('No file uploaded.');
       return res.status(400).json({ error: 'No file uploaded', logs });
     }
     logs.push(`File uploaded: ${req.file.originalname}`);
 
-    // Read PDF file
+    // 2) Read PDF from /tmp
     const fileBuffer = fs.readFileSync(req.file.path);
     logs.push('Extracting text with pdf-parse...');
     const pdfData = await pdfParse(fileBuffer);
     const extractedText = pdfData.text;
     logs.push('Text extraction complete.');
 
-    // Split into chunks
+    // 3) Split into chunks
     logs.push('Splitting text into chunks...');
     const textChunks = splitTextIntoChunks(extractedText);
     logs.push(`Document split into ${textChunks.length} chunks.`);
 
-    // Initialize Pinecone
-    logs.push('Initializing Pinecone...');
+    // 4) Initialize Pinecone (NO environment)
+    logs.push('Initializing Pinecone (serverless index)...');
     const pinecone = new PineconeClient();
     await pinecone.init({
       apiKey: process.env.PINECONE_API_KEY,
-      environment: process.env.PINECONE_ENV
+      // environment: not needed for serverless index
     });
-    const index = pinecone.Index(process.env.PINECONE_INDEX);
 
-    // Initialize OpenAI
+    // 5) Initialize OpenAI
     logs.push('Initializing OpenAI...');
     const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
     const openai = new OpenAIApi(configuration);
 
-    // Generate embeddings + upsert
+    // 6) Upsert vectors to Pinecone
     logs.push('Generating embeddings and upserting to Pinecone...');
+    const index = pinecone.Index(process.env.PINECONE_INDEX); // name of your serverless index
     const vectors = [];
     for (let i = 0; i < textChunks.length; i++) {
       const chunk = textChunks[i];
@@ -102,7 +100,6 @@ apiRoute.post(async (req, res) => {
   }
 });
 
-// Helper function to chunk text
 function splitTextIntoChunks(text, maxLength = 1000) {
   const chunks = [];
   let start = 0;
@@ -123,10 +120,9 @@ function splitTextIntoChunks(text, maxLength = 1000) {
   return chunks;
 }
 
-// Disable Next.js default body parsing for file uploads
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // we use multer instead
   },
 };
 
